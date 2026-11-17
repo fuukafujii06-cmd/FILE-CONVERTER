@@ -8,6 +8,15 @@
 # ただし将来、変換機を動的に読み込むようになった場合に備え、
 # 組み込みの変換機を hiddenimports にも明示しておく。
 # ビルドし直すときは build/ と dist/ は .gitignore で除外される。
+#
+# アイコン：converter.ico は本物の ICO 形式（16/32/48/256px 入り）。
+# 以前は PNG データに .ico という名前が付いていたため、Windows で
+# PyInstaller がアイコンとして使えないおそれがあった。Pillow で
+# ICO 形式に変換し直してある。Linux ではアイコンは無視される
+# （"Ignoring icon; supported only on Windows and macOS!"）。
+#
+# 注意：PyInstaller はホスト OS 用のバイナリしか作れない。
+# Windows の exe は Windows（手元の PC か GitHub Actions）で作ること。
 
 
 a = Analysis(

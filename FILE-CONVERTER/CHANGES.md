@@ -4,6 +4,99 @@
 合意した設計どおりに分け直した。GitHub への push はしていない。
 作業元：`https://github.com/fuukafujii06-cmd/FILE-CONVERTER`（main ブランチ、2026-11-17 時点）
 
+## Windows 用 exe の作り方（2026-11-18）
+
+藤井の依頼で、更新したものを Windows 用 exe にする方法を用意した。
+**この環境（Linux）では Windows の exe は作れない。** PyInstaller は
+ホスト OS 用のバイナリしか作らないため、Linux で作ると Linux 用の
+実行ファイルになる。Linux で作ったバイナリを Windows 用 exe として
+渡すことはしない。
+
+### なぜ Linux では作れないか
+
+- PyInstaller は、そのマシンの OS・CPU 向けのブートローダとライブラリを
+  束ねる。Linux 上では ELF 形式の実行ファイルしかできない。
+- Windows の exe（PE 形式、`.exe`）を作るには、Windows 上で
+  PyInstaller を動かす必要がある。手元の Windows PC か、GitHub Actions
+  の `windows-latest` を使う。
+
+### 用意したもの
+
+- `.github/workflows/build-windows.yml`（新規）
+  - `windows-latest` で動く。Python 3.12 をセットアップし、
+    `pip install pymupdf pillow pyinstaller` をして、
+    `pyinstaller --clean --noconfirm FILE-CONVERTER.spec` を実行し、
+    `dist/FILE-CONVERTER.exe` を Artifact（`FILE-CONVERTER-windows`）
+    としてアップロードする。
+  - 実行のきっかけは2つ：Actions タブからの手動実行
+    （`workflow_dispatch`）と、main への push または `v*` タグの push。
+  - `requirements.txt` は作っていない。依存ライブラリは workflow 内で
+    直接 `pip install` する形にした。
+- `build.bat`（新規）
+  - 手元の Windows でダブルクリックするだけのバッチ。やっていることは
+    `pip install pymupdf pillow pyinstaller` と
+    `pyinstaller --clean --noconfirm FILE-CONVERTER.spec` の2つ。
+    できあがりは `dist\FILE-CONVERTER.exe`。
+- `README.md` に「exe にする（Windows）」の節を追加し、上の2つの
+  方法と spec で束ねているものを書いた。
+
+### spec とアイコンで束ねているもの
+
+`FILE-CONVERTER.spec` は変更の必要がなかった（コメントだけ追記した）。
+
+- 入口：`converter-main.py`（`core.app.main()` を呼ぶ薄い入口）
+- 名前：`FILE-CONVERTER`（`console=False`、画面だけのアプリ）
+- アイコン：`icon=['converter.ico']`
+- `hiddenimports=['converters.pdf_to_image']`：組み込みの変換機を明示。
+  `core/` と `converters/` は `converter-main.py -> core.app ->`
+  `converters.registry -> converters.pdf_to_image` と静的に import
+  されるため、通常は自動で収集される。
+- `core/jobs.py`、`converters/base.py`、`converters/registry.py` も
+  同じ静的 import の連鎖で収集される。
+
+### アイコンの修正（今回見つかった問題）
+
+- `converter.ico` の中身が、実は PNG データ（540x540）に `.ico` と
+  いう名前が付いたものだった。Windows で PyInstaller がアイコンとして
+  使えないおそれがあったため、Pillow で本物の ICO 形式に変換し直した。
+  今は 16/32/48/256px 入りの ICO（8.6KB）。
+- 元の PNG データは `/tmp` にだけ残し、成果物には含めていない。
+
+### spec の検証（Linux ビルド、あくまで検証用）
+
+- テスト用 venv（`~/.fc-test-venv`、PyMuPDF + Pillow）に PyInstaller
+  6.22.3 を入れて、この環境で `pyinstaller FILE-CONVERTER.spec` を
+  実行した。結果：**ビルド成功（"Build complete!"）**。
+- できたものは `dist/FILE-CONVERTER`（約100MB）で、`file` コマンドで
+  確認すると **ELF 64-bit LSB executable, x86-64, for GNU/Linux**。
+  Windows の exe（PE 形式）ではないため、成果物には含めていない。
+  検証用の build / dist は `/tmp` に作り、作業後に削除した。
+- ビルドの警告：`WARNING: Ignoring icon; supported only on Windows and macOS!`
+  が出た。Linux ではアイコンが無視されるため、アイコンの検証は
+  Linux ではできない。アイコンが正しく付くかは Windows での
+  ビルドで確認する必要がある。
+- 収集の確認：ビルドの xref に `converters.base`、`converters.pdf_to_image`、
+  `converters.registry`、`core.app`、`core.jobs` が含まれていた。
+  warn ファイルに出た不足モジュールは `_winapi`、`msvcrt`、`winreg`、
+  `nt` など Windows 専用のもので、Linux では出るのが正常。Windows
+  では問題にならないはず。
+- 検証中に起きた問題：`/tmp` は 512MB の tmpfs で、100MB の
+  ビルドを2回続けて行ったら「No space left on device」で2回目の
+  ビルドが途中で壊れた。`/tmp` を掃除してから1回だけやり直し、
+  正常に完了した。spec の問題ではない。
+- `python -m py_compile`：`converter-main.py`、`core/*`、
+  `converters/*`、`FILE-CONVERTER.spec`、workflow の YAML 構文
+  （`python -c "import yaml"` での読み込み）は OK。
+  ※ `build.bat` は Windows 用のため、この環境では実行していない。
+
+### 未確認の点
+
+- 実際の Windows でのビルド（GitHub Actions でも手元の PC でも）は、
+  この環境では未確認。Actions を回して `FILE-CONVERTER.exe` が
+  できることと、アイコンが付くことを確認する必要がある。
+- Windows での exe の起動と画面操作も未確認。`python converter-main.py`
+  での起動確認と同様に、exe でも確認すること。
+
 ## 2026-11-18 の小さな改善（EmptyPdfError とホーム基準の出力先）
 
 藤井の提案で、0ページエラーの判定を文字列比較から型による判定に変え、

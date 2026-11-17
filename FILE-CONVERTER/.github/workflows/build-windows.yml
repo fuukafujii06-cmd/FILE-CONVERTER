@@ -1,0 +1,46 @@
+name: Build Windows exe
+
+# Windows 用の exe は Windows 上でしか作れない（PyInstaller は
+# ホスト OS 用のバイナリしか作らない）ため、このワークフローで作る。
+# Linux / macOS では FILE-CONVERTER.exe は作れない。
+#
+# 使い方：
+#   1. このリポジトリを GitHub に push する（.github/workflows/ を含む）。
+#   2. GitHub の Actions タブで "Build Windows exe" を開き、
+#      "Run workflow" を押す（main への push や v* タグでも自動で動く）。
+#   3. 完了したら、その実行結果の Artifacts から
+#      FILE-CONVERTER-windows をダウンロードする。
+#      中に dist/FILE-CONVERTER.exe が入っている。
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pymupdf pillow pyinstaller
+
+      - name: Build exe with PyInstaller
+        run: pyinstaller --clean --noconfirm FILE-CONVERTER.spec
+
+      - name: Upload exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: FILE-CONVERTER-windows
+          path: dist/FILE-CONVERTER.exe
+          if-no-files-found: error
