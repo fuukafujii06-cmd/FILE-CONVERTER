@@ -6,7 +6,7 @@
 
 ## Windows 用 exe の作り方（2026-11-18）
 
-藤井の依頼で、更新したものを Windows 用 exe にする方法を用意した。
+更新したものを Windows 用 exe にする方法を用意した。
 **この環境（Linux）では Windows の exe は作れない。** PyInstaller は
 ホスト OS 用のバイナリしか作らないため、Linux で作ると Linux 用の
 実行ファイルになる。Linux で作ったバイナリを Windows 用 exe として
