@@ -4,6 +4,124 @@
 合意した設計どおりに分け直した。GitHub への push はしていない。
 作業元：`https://github.com/fuukafujii06-cmd/FILE-CONVERTER`（main ブランチ、2026-11-17 時点）
 
+## 複数の画像を1つの PDF にまとめる（2026-11-18）
+
+藤井の依頼で、画像を複数枚まとめて1つの PDF に変換できるようにした。
+これまで core は入力ファイルを1つだけ選ぶ作りだったため、新しい
+変換機「Images to PDF」1つと、core の複数入力対応を一緒に実装した。
+単体版（画像1枚→PDF 1ページ）の変換機は別に作らず、この1つに
+まとめた。1枚だけ選んだ場合は PDF 1ページになる。
+
+### 仕様
+
+- 変換機：`ImagesToPdfConverter`（`converters/images_to_pdf.py`）
+  - id `images_to_pdf`、表示名「Images to PDF」、
+    入力欄「SELECT IMAGE FILES」、設定枠「PDF Settings」、
+    進捗の単位は `pages`。
+  - 入力：PNG / JPG / JPEG / WebP / BMP。出力は PDF 1ファイル
+    （`{prefix}.pdf`）。各画像が PDF 1ページになる。
+  - ページ順は、ファイル選択ダイアログで選んだ順のまま。
+  - オプション（試作と同じ）：PAGE SIZE = A4 / A5 / Letter
+    （初期値 A4）、MARGIN = 0–50mm（初期値 10）、FIT = fit（収める）
+    / fill（用紙いっぱい）。
+  - 透明 PNG は RGB に変換して白背景にのせる。Pillow のみで、
+    新しい依存ライブラリはない。
+  - 描き方は試作と同じ：各画像を白背景の用紙サイズのページ画像に
+    中央配置し、72dpi で保存する（1px = 1pt）。複数ページは
+    `save_all=True` + `append_images` で1つの PDF にまとめる。
+  - エラーは ValueError に揃えた。存在しない入力・対応外の拡張子・
+    空のリスト・不正な PAGE SIZE は、出力フォルダを作る前に弾く。
+    （試作の修正と同じ方針。`convert()` を直接呼んだ場合も同じ。）
+
+### core の複数入力対応（設計）
+
+- `converters/base.py`
+  - `accepts_multiple_inputs: bool = False` を追加。
+    `ImagesToPdfConverter` だけ `True` にする。
+  - 複数用として `expected_outputs_for_sources(sources, ...)` と
+    `convert_sources(sources, ..., progress_callback)` を追加。
+    既定の実装は単一版に委譲する（`sources[0]` を使う。空なら
+    ValueError）。既存の単一入力の型
+    （`expected_outputs(source: Path, ...)` /
+    `convert(source: Path, ...)`）は壊していない。
+  - `ImagesToPdfConverter` は複数版を実装し、単一版は複数版に
+    委譲する。どちらの呼び方でも同じ結果になる。
+- `core/jobs.py`
+  - `prepare_conversion_for_sources` /
+    `run_conversion_for_sources` を追加。既存の
+    `prepare_conversion` / `run_conversion` は単一入力の
+    ラッパーとして残した。
+  - 保存先は既存の `build_destination` の流儀を保つ
+    （output_dir / 最初の入力ファイルの stem）。
+- `core/app.py`
+  - 変換機が `accepts_multiple_inputs` のときだけ
+    `filedialog.askopenfilenames` を使い、そうでないときは従来通り
+    `askopenfilename` を使う。
+  - 入力欄の表示：1枚ならそのパス、複数なら
+    `最初のファイルパス (+N files)`（N は残りの枚数）。
+    ファイル名の初期値は最初のファイルの stem。
+  - 変換機を切り替えたら入力欄とファイル名をクリアする。
+    単一→複数・複数→単一の切り替えで古い入力が残らない。
+  - 進捗は画像1枚ごとに `progress_callback(i, total)` を呼ぶ。
+    進捗の総数は、複数入力なら選んだ枚数、単一入力なら
+    出力ファイル数。
+
+### 変えた・足したファイル
+
+- 新規：`converters/images_to_pdf.py`
+- 変更：`converters/base.py`（`accepts_multiple_inputs` と複数用
+  メソッドを追加）、`converters/registry.py`
+  （`ImagesToPdfConverter` を登録）、`FILE-CONVERTER.spec`
+  （`hiddenimports` に `converters.images_to_pdf` を追加。
+  `converters.pdf_to_image` は残した）、`core/jobs.py`
+  （複数入力版の準備・実行を追加し、既存関数はラッパー化）、
+  `core/app.py`（複数選択ダイアログ、入力表示、切り替え時の
+  クリア、複数入力の準備・実行）、`README.md`、`CHANGES.md`
+  （この節）。
+- PDF→画像（`PdfToImageConverter`）の動きは変えていない。
+  起動時の既定の変換機も「PDF to Image」のまま。
+
+### テスト結果
+
+テスト環境：Python 3.12.3、PyMuPDF、Pillow。GUI のテストは Xvfb 上で実施。
+テスト用スクリプトは成果物には含めていない（`/tmp/fc-multi/test_multi.py`、
+`/tmp/fc-multi/test_order.py`、`/tmp/fc-multi/test_gui.py`）。
+
+- `python -m py_compile`：全ファイル OK（`converter-main.py`、
+  `core/*`、`converters/*`、`FILE-CONVERTER.spec`）。
+- 変換のテスト（27件、全て PASS）：
+  - 3枚の画像（PNG / JPEG / 透明 PNG）→ PDF 3ページ、A4 で
+    595x841pt、進捗コールバックは `(1, 3)`、`(2, 3)`、`(3, 3)`。
+  - Letter・fill・余白 0 で 612x792pt、2ページ。
+  - 単一版の呼び方（`prepare_conversion` / `run_conversion`）
+    でも1枚→PDF 1ページになること。
+  - WebP / BMP / 大文字 `.JPG` も3枚→3ページになること。
+  - エラー系はすべて ValueError：存在しない入力、対応外の拡張子、
+    空のリスト、不正な PAGE SIZE（B5）。`expected_outputs_for_sources`
+    でも同じ。出力フォルダが作られていないことも確認。
+  - 既存の PDF→画像も回し、2ページ PDF が2枚の PNG になることを確認。
+- ページ順のテスト（1件、PASS）：赤・緑・青の正方形画像3枚を
+  その順で渡し、PDF の各ページ中央の色がその順になることを確認
+  （Pillow の PDF 保存は JPEG 圧縮のため ±5 の誤差を許容）。
+- GUI のテスト（Xvfb 上で実ウィンドウを作成、15件、全て PASS）：
+  - 変換機の一覧が「PDF to Image」「Images to PDF」になること。
+  - 「Images to PDF」を選ぶと入力欄が「SELECT IMAGE FILES」、
+    設定枠が「PDF Settings」、オプションが page_size / margin /
+    fit になること。切り替えで入力がクリアされること。
+  - 複数選択の表示が `最初のパス (+2 files)`、入力一覧が3件、
+    ファイル名が最初のファイルの stem になること。
+  - 「PDF to Image」に戻すと従来通り1ファイル選択になり、
+    切り替えで入力がクリアされること。
+
+### 未確認の点
+
+- 実際の Windows での動作（画面での複数選択、exe の起動）は、
+  この環境では未確認。exe の再ビルドは Windows 側
+  （藤井のターミナルか GitHub Actions）が必要。
+- 画像が非常に大きい・枚数が多い場合のメモリ使用量は測っていない。
+  ページ画像をすべてメモリに持ってから1つの PDF に保存する作りのため、
+  大量の画像では重くなる可能性がある。
+
 ## Windows 用 exe の作り方（2026-11-18）
 
 更新したものを Windows 用 exe にする方法を用意した。

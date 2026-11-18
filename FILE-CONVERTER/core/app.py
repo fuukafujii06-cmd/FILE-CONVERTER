@@ -56,6 +56,9 @@ class ConverterApp(tk.Tk):
 
         # --- 入出力 ---
         self.input_path = tk.StringVar()
+        # 複数入力の変換機で選んだファイル一覧。単一入力のときは
+        # 0件か1件。表示用の input_path とは別に持つ。
+        self.input_paths: list[Path] = []
         self.output_path = tk.StringVar(value=default_output_dir())
         self.filename = tk.StringVar()
 
@@ -83,6 +86,11 @@ class ConverterApp(tk.Tk):
         """変換機が切り替わったら、入力欄とオプション欄を作り直す。"""
         converter = self.converter
         self.input_label_var.set(converter.input_label)
+        # 単一→複数・複数→単一の切り替えで古い入力が残らないように、
+        # 入力欄とファイル名をクリアする。
+        self.input_paths = []
+        self.input_path.set("")
+        self.filename.set("")
         # LabelFrame に textvariable は使えないため、text を直接変える。
         self.settings.configure(text=converter.options_title)
         self._rebuild_options()
@@ -246,11 +254,28 @@ class ConverterApp(tk.Tk):
     # -- ファイル選択 ----------------------------------------------------
     def select_input(self) -> None:
         converter = self.converter
+        if converter.accepts_multiple_inputs:
+            paths = filedialog.askopenfilenames(
+                title=converter.input_label,
+                filetypes=list(converter.input_filetypes),
+            )
+            if paths:
+                self.input_paths = [Path(p) for p in paths]
+                if len(paths) == 1:
+                    self.input_path.set(paths[0])
+                else:
+                    # 最初のファイル + 残りの枚数が分かる表示にする。
+                    self.input_path.set(
+                        f"{paths[0]} (+{len(paths) - 1} files)"
+                    )
+                self.filename.set(Path(paths[0]).stem)
+            return
         path = filedialog.askopenfilename(
             title=converter.input_label,
             filetypes=list(converter.input_filetypes),
         )
         if path:
+            self.input_paths = [Path(path)]
             self.input_path.set(path)
             self.filename.set(Path(path).stem)
 
@@ -268,11 +293,27 @@ class ConverterApp(tk.Tk):
         prefix: str,
         options: dict[str, Any],
     ) -> None:
+        """別スレッドで変換を実行し、結果を GUI スレッドへ返す。
+
+        単一入力のラッパー。中身は convert_worker_for_sources。
+        """
+        self.convert_worker_for_sources(
+            converter, [source], destination, prefix, options
+        )
+
+    def convert_worker_for_sources(
+        self,
+        converter: Converter,
+        sources: list[Path],
+        destination: Path,
+        prefix: str,
+        options: dict[str, Any],
+    ) -> None:
         """別スレッドで変換を実行し、結果を GUI スレッドへ返す。"""
         try:
-            total = jobs.run_conversion(
+            total = jobs.run_conversion_for_sources(
                 converter,
-                source,
+                sources,
                 destination,
                 prefix,
                 options,
@@ -347,15 +388,31 @@ class ConverterApp(tk.Tk):
             return
 
         # 変換の準備（保存先作成・出力一覧の取得）
-        source = Path(self.input_path.get())
+        # 複数入力の変換機は選んだファイル一覧をそのまま使う。
+        # 単一入力の変換機は入力欄の1ファイルを使う。
+        if converter.accepts_multiple_inputs:
+            sources = list(self.input_paths)
+        elif self.input_paths:
+            sources = list(self.input_paths)
+        else:
+            sources = [Path(self.input_path.get())]
         try:
-            destination, expected = jobs.prepare_conversion(
-                converter,
-                source,
-                self.output_path.get(),
-                prefix,
-                options,
-            )
+            if converter.accepts_multiple_inputs:
+                destination, expected = jobs.prepare_conversion_for_sources(
+                    converter,
+                    sources,
+                    self.output_path.get(),
+                    prefix,
+                    options,
+                )
+            else:
+                destination, expected = jobs.prepare_conversion(
+                    converter,
+                    sources[0],
+                    self.output_path.get(),
+                    prefix,
+                    options,
+                )
         except EmptyPdfError as e:
             # ページ数 0 は、元と同じく警告だけ出して中断する。
             # 型で判定するため、メッセージ文言を変えても壊れない。
@@ -375,7 +432,8 @@ class ConverterApp(tk.Tk):
             return
 
         self.current_destination = str(destination)
-        total = len(expected)
+        # 進捗の総数：複数入力なら選んだ枚数、単一入力なら出力ファイル数。
+        total = len(sources) if converter.accepts_multiple_inputs else len(expected)
         unit = converter.unit_name
 
         # 上書き確認
@@ -395,8 +453,8 @@ class ConverterApp(tk.Tk):
             text=f"Starting conversion...:0/{total} {unit}"
         )
         thread = threading.Thread(
-            target=self.convert_worker,
-            args=(converter, source, destination, prefix, options),
+            target=self.convert_worker_for_sources,
+            args=(converter, sources, destination, prefix, options),
             daemon=True,
         )
         thread.start()

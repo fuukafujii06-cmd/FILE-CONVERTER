@@ -41,6 +41,51 @@ def find_existing(paths: list[Path]) -> list[Path]:
     return [path for path in paths if path.exists()]
 
 
+def prepare_conversion_for_sources(
+    converter: Converter,
+    sources: list[str | Path],
+    output_dir: str | Path,
+    prefix: str,
+    options: dict[str, Any],
+) -> tuple[Path, list[Path]]:
+    """複数入力版の prepare_conversion()。
+
+    保存先は、既存の build_destination の流儀を保つ
+    （output_dir / 最初の入力ファイルの stem）。出力は
+    変換機が返す一覧（Images to PDF なら PDF 1ファイル）。
+    不正があれば ValueError を返す。
+    """
+    cleaned_prefix = validate_prefix(prefix)
+    validated_options = converter.validate_options(options)
+    source_paths = [Path(s) for s in sources]
+    if not source_paths:
+        raise ValueError("No input files selected.")
+    destination = build_destination(output_dir, source_paths[0])
+    expected = converter.expected_outputs_for_sources(
+        source_paths, destination, cleaned_prefix, validated_options
+    )
+    destination.mkdir(parents=True, exist_ok=True)
+    return destination, expected
+
+
+def run_conversion_for_sources(
+    converter: Converter,
+    sources: list[str | Path],
+    destination: str | Path,
+    prefix: str,
+    options: dict[str, Any],
+    progress_callback: Optional[ProgressCallback] = None,
+) -> int:
+    """複数入力版の run_conversion()。変換した単位の数を返す。"""
+    return converter.convert_sources(
+        sources=[Path(s) for s in sources],
+        destination=Path(destination),
+        prefix=prefix,
+        options=options,
+        progress_callback=progress_callback,
+    )
+
+
 def prepare_conversion(
     converter: Converter,
     source: str | Path,
@@ -58,16 +103,11 @@ def prepare_conversion(
     戻り値は (保存先フォルダ, 出力ファイルの一覧)。
     不正があれば ValueError を返す。ページ数 0 の場合は、その専用
     例外である EmptyPdfError（ValueError のサブクラス）が返る。
+    単一入力のラッパー。中身は prepare_conversion_for_sources。
     """
-    cleaned_prefix = validate_prefix(prefix)
-    validated_options = converter.validate_options(options)
-    source_path = Path(source)
-    destination = build_destination(output_dir, source_path)
-    expected = converter.expected_outputs(
-        source_path, destination, cleaned_prefix, validated_options
+    return prepare_conversion_for_sources(
+        converter, [source], output_dir, prefix, options
     )
-    destination.mkdir(parents=True, exist_ok=True)
-    return destination, expected
 
 
 def run_conversion(
@@ -78,11 +118,15 @@ def run_conversion(
     options: dict[str, Any],
     progress_callback: Optional[ProgressCallback] = None,
 ) -> int:
-    """変換機に変換を実行させ、変換した単位の数を返す。"""
-    return converter.convert(
-        source=Path(source),
-        destination=Path(destination),
-        prefix=prefix,
-        options=options,
+    """変換機に変換を実行させ、変換した単位の数を返す。
+
+    単一入力のラッパー。中身は run_conversion_for_sources。
+    """
+    return run_conversion_for_sources(
+        converter,
+        [source],
+        destination,
+        prefix,
+        options,
         progress_callback=progress_callback,
     )

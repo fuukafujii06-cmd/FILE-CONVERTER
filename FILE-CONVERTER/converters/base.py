@@ -94,6 +94,11 @@ class Converter(ABC):
     # 進捗・完了メッセージで使う変換単位の名前（例: "pages"）。
     unit_name: str = "items"
 
+    # 複数の入力ファイルをまとめて1つの出力にするか。
+    # False（既定）の変換機は入力1ファイルだけを受け付ける。
+    # True の変換機だけ、GUI で複数選択ができる。
+    accepts_multiple_inputs: bool = False
+
     @classmethod
     @abstractmethod
     def options(cls) -> list[Option]:
@@ -162,6 +167,48 @@ class Converter(ABC):
         出力先フォルダの作成はここでは行わない（core が行う）。
         """
         raise NotImplementedError
+
+    def expected_outputs_for_sources(
+        self,
+        sources: list[Path],
+        destination: Path,
+        prefix: str,
+        options: dict[str, Any],
+    ) -> list[Path]:
+        """複数入力版の expected_outputs()。
+
+        既定では単一版に委譲する（sources[0] を使う）。空のリストは
+        ValueError。複数入力の変換機はこれをオーバーライドする。
+        出力先フォルダの作成はここでは行わない（core が行う）。
+        """
+        if not sources:
+            raise ValueError("No input files selected.")
+        return self.expected_outputs(
+            sources[0], destination, prefix, options
+        )
+
+    def convert_sources(
+        self,
+        sources: list[Path],
+        destination: Path,
+        prefix: str,
+        options: dict[str, Any],
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> int:
+        """複数入力版の convert()。
+
+        既定では単一版に委譲する（sources[0] を使う）。空のリストは
+        ValueError。複数入力の変換機はこれをオーバーライドする。
+        """
+        if not sources:
+            raise ValueError("No input files selected.")
+        return self.convert(
+            sources[0],
+            destination,
+            prefix,
+            options,
+            progress_callback=progress_callback,
+        )
 
     @abstractmethod
     def convert(

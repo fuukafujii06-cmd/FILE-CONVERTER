@@ -8,12 +8,14 @@ _BUILTIN_CONVERTERS にクラスを1行足すだけ。core はここ経由でし
 from __future__ import annotations
 
 from converters.base import Converter
+from converters.images_to_pdf import ImagesToPdfConverter
 from converters.pdf_to_image import PdfToImageConverter
 
 
 # 起動時に読み込む変換機の一覧。新しい変換機はここに足す。
 _BUILTIN_CONVERTERS: tuple[type[Converter], ...] = (
     PdfToImageConverter,
+    ImagesToPdfConverter,
 )
 
 _REGISTRY: dict[str, type[Converter]] = {}
